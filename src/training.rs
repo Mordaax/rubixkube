@@ -18,6 +18,8 @@ pub struct TrainingResult {
     pub val_loss: f64,
     pub history: Vec<Observation>,
     pub execution: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gpu: Option<GpuEvidence>,
 }
 
 /// Fit the original demo's fixed dataset using full-batch gradient descent.
@@ -66,5 +68,16 @@ pub fn train(learning_rate: f64, epochs: usize) -> Result<TrainingResult> {
         val_loss,
         history,
         execution: "CPU, Rust; no GPU or simulated score".into(),
+        gpu: None,
     })
+}
+
+/// Evidence collected from a completed CUDA kernel, checked against CPU results.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct GpuEvidence {
+    pub device_name: String,
+    pub compute_capability: [i32; 2],
+    pub kernel_launches: usize,
+    pub cuda_elapsed_ms: f64,
+    pub cpu_reference_max_abs_error: f64,
 }

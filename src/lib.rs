@@ -27,3 +27,8 @@ pub mod metrics;
 pub mod orchestrate;
 pub mod process;
 pub mod serve;
+
+#[cfg(feature = "cuda")]
+pub mod gpu;
+
+pub mod gpu_cluster;

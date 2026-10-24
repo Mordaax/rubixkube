@@ -73,7 +73,7 @@ cargo run --locked --release -- smoke
 
 The Rust suite covers numerical parity, objective selection/refusal paths, TLS authentication and certificate rejection, finite retries, corrupt/dirty Git source checks, process deadlines/large output, CLI and contained serving. `smoke` executes the actual pinned upstream Go packages and saves structured logs outside Git. Real Kubernetes acceptance is a separate executed check.
 
-GPU execution, shared initialization, Grid search, controller/provider crash recovery and a new SDK OptimizationJob backend have not been implemented by this conversion. It does not convert the upstream Go/Python projects or claim production readiness.
+This page documents the CPU path. An optional CUDA backend and separate GPU Kubernetes demo are documented in [gpu/README.md](gpu/README.md). Shared initialization, Grid search, controller/provider crash recovery and a new SDK OptimizationJob backend remain unfinished. It does not convert the upstream Go/Python projects or claim production readiness.
 
 To remove only this explicitly named disposable cluster after inspection:
 

@@ -1,0 +1,38 @@
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: rubixkube-nvidia-device-plugin
+  namespace: kube-system
+spec:
+  selector:
+    matchLabels: {app: rubixkube-nvidia-device-plugin}
+  template:
+    metadata:
+      labels: {app: rubixkube-nvidia-device-plugin}
+    spec:
+      tolerations:
+        - operator: Exists
+      containers:
+        - name: device-plugin
+          image: nvcr.io/nvidia/k8s-device-plugin@sha256:27c1b2553a690ca3d29889dcd61df97525d46f58272c0be8dc63c2b18f120075
+          imagePullPolicy: IfNotPresent
+          env:
+            - {name: LD_LIBRARY_PATH, value: /usr/lib/wsl/lib}
+            - {name: PASS_DEVICE_SPECS, value: "true"}
+            - {name: FAIL_ON_INIT_ERROR, value: "true"}
+          securityContext:
+            privileged: true
+          resources:
+            requests: {cpu: 50m, memory: 64Mi}
+            limits: {cpu: 500m, memory: 256Mi}
+          volumeMounts:
+            - {name: plugins, mountPath: /var/lib/kubelet/device-plugins}
+            - {name: wsl, mountPath: /usr/lib/wsl, readOnly: true}
+            - {name: dxg, mountPath: /dev/dxg}
+      volumes:
+        - name: plugins
+          hostPath: {path: /var/lib/kubelet/device-plugins, type: Directory}
+        - name: wsl
+          hostPath: {path: /usr/lib/wsl, type: Directory}
+        - name: dxg
+          hostPath: {path: /dev/dxg, type: CharDevice}

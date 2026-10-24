@@ -1,0 +1,6 @@
+FROM nvidia/cuda@sha256:4a801ef9232d2b05e69df4eb8aa054dbbe2824e5499e1e6e857320bb01ac41a9
+ENV LD_LIBRARY_PATH=/usr/lib/wsl/lib:/usr/local/cuda/lib64
+COPY --chmod=0555 optimizationjob /app/optimizationjob
+USER 65532:65532
+WORKDIR /app
+ENTRYPOINT ["/app/optimizationjob", "train", "--device", "cuda"]

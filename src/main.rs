@@ -39,6 +39,9 @@ enum Action {
         /// Train locally without claiming Kubernetes metric delivery.
         #[arg(long)]
         local: bool,
+        /// Execution device; CUDA errors never fall back to CPU.
+        #[arg(long, default_value = "cpu", value_parser = ["cpu","cuda"])]
+        device: String,
     },
     /// Submit/watch a real job and save independently verified report artifacts.
     Run(RunArgs),
@@ -61,6 +64,9 @@ enum Action {
 }
 #[derive(clap::Args)]
 struct RunArgs {
+    /// Use the dedicated GPU cluster/runtime and require CUDA evidence.
+    #[arg(long)]
+    gpu: bool,
     /// Inspect a previously completed Rust job instead of submitting another.
     #[arg(long)]
     existing: Option<String>,
@@ -94,10 +100,21 @@ fn root(explicit: Option<PathBuf>) -> Result<PathBuf> {
 fn options(root: &Path, args: RunArgs) -> Result<RunOptions> {
     Ok(RunOptions {
         existing: args.existing,
-        kubeconfig: args
-            .kubeconfig
-            .unwrap_or_else(|| root.join(".tools/demo/kubeconfig")),
-        output: args.output.unwrap_or(orchestrate::report_directory(root)?),
+        gpu: args.gpu,
+        kubeconfig: args.kubeconfig.unwrap_or_else(|| {
+            root.join(if args.gpu {
+                ".tools/gpu/kubeconfig"
+            } else {
+                ".tools/demo/kubeconfig"
+            })
+        }),
+        output: args.output.unwrap_or(if args.gpu {
+            root.parent()
+                .ok_or_else(|| invalid("No workspace parent"))?
+                .join("optimizationjob-evidence/runs/gpu/reports")
+        } else {
+            orchestrate::report_directory(root)?
+        }),
         timeout: Duration::from_secs(args.timeout),
     })
 }
@@ -107,6 +124,7 @@ fn execute(cli: Cli) -> Result<()> {
             learning_rate,
             epochs,
             local,
+            device,
         } => {
             let rate = match learning_rate {
                 Some(rate) => rate,
@@ -122,7 +140,18 @@ fn execute(cli: Cli) -> Result<()> {
                     "Kubernetes demo uses exactly 40 epochs; custom epochs require --local",
                 ));
             }
-            let result = train(rate, epochs)?;
+            let result = if device == "cuda" {
+                #[cfg(feature = "cuda")]
+                {
+                    optimizationjob::gpu::train_cuda(rate, epochs)?
+                }
+                #[cfg(not(feature = "cuda"))]
+                {
+                    return Err(invalid("Rebuild with --features cuda to use GPU training"));
+                }
+            } else {
+                train(rate, epochs)?
+            };
             let mut event = serde_json::to_value(&result)?;
             event["event"] = json!("training_complete");
             println!("{event}");

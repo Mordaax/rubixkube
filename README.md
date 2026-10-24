@@ -9,7 +9,9 @@ The local demo submits a real `trainer.kubeflow.org/v1alpha1` OptimizationJob. F
 | File | Responsibility |
 |---|---|
 | `src/main.rs` | CLI: `train`, `run`, `start`, `smoke`, `serve` |
-| `src/training.rs` | Deterministic model fitting and validation history |
+| `src/training.rs` | Deterministic CPU model fitting and validation history |
+| `src/gpu.rs` | Actual CUDA training, device timing and CPU parity verification |
+| `src/gpu_cluster.rs` | Dedicated WSL GPU Kubernetes cluster setup |
 | `src/metrics.rs` | HTTPS metric push with projected CA and bearer token |
 | `src/process.rs` | Bounded external commands, source cleanliness/revision checks |
 | `src/report.rs` | Independent objective ranking and winner validation |
@@ -61,4 +63,4 @@ The `start` command packages the executable you invoke as the non-root training 
 
 ## Scope
 
-This is a real integration demonstration, not a new Rust implementation of the upstream OptimizationJob controller or SDK. GPU execution, shared initialization, a new OptimizerClient backend and production crash-recovery guarantees remain outside this migration. The metrics client implements Trainer's existing protocol directly; the Python SDK is not executed by the Rust worker.
+This is a real integration demonstration, not a new Rust implementation of the upstream OptimizationJob controller or SDK. Optional real GPU execution is available with `--features cuda` and `start --gpu`; see [the GPU guide](demo/gpu/README.md). Shared initialization, a new OptimizerClient backend and production crash-recovery guarantees remain outside this demo. The metrics client implements Trainer's existing protocol directly; the Python SDK is not executed by the Rust worker.

@@ -24,6 +24,7 @@ const PROVIDER_TAG: &str = "ghcr.io/kubeflow/katib/suggestion-optuna:v0.19.0";
 /// Options for submitting or inspecting one real demo run.
 #[derive(Debug, Clone)]
 pub struct RunOptions {
+    pub gpu: bool,
     pub existing: Option<String>,
     pub kubeconfig: PathBuf,
     pub output: PathBuf,
@@ -36,20 +37,25 @@ pub fn report_directory(root: &Path) -> Result<PathBuf> {
         .ok_or_else(|| invalid("Repository must have a parent"))?
         .join("optimizationjob-evidence/runs/rust/reports"))
 }
-fn kube(config: &Path, args: &[&str], payload: Option<&Value>) -> Result<String> {
+pub(crate) fn kube(
+    config: &Path,
+    gpu: bool,
+    args: &[&str],
+    payload: Option<&Value>,
+) -> Result<String> {
     let bytes = payload.map(serde_json::to_vec).transpose()?;
     checked(
         Command::new("kubectl")
             .arg("--kubeconfig")
             .arg(config)
-            .args(["--context", CONTEXT])
+            .args(["--context", context(gpu)])
             .args(args),
         bytes.as_deref(),
         Duration::from_secs(45),
     )
 }
-fn kube_json(config: &Path, args: &[&str]) -> Result<Value> {
-    Ok(serde_json::from_str(&kube(config, args, None)?)?)
+fn kube_json(config: &Path, gpu: bool, args: &[&str]) -> Result<Value> {
+    Ok(serde_json::from_str(&kube(config, gpu, args, None)?)?)
 }
 fn array(value: &Value) -> Result<&Vec<Value>> {
     value
@@ -85,6 +91,10 @@ fn save_json(directory: &Path, name: &str, data: &Value) -> Result<()> {
 
 /// Require a Rust worker's measured training and explicit acknowledgement events.
 pub fn validate_worker(row: &Value, logs: &str) -> Result<TrainingResult> {
+    validate_worker_mode(row, logs, false)
+}
+/// Verify execution-mode-specific evidence without accepting a CPU fallback.
+pub fn validate_worker_mode(row: &Value, logs: &str, gpu: bool) -> Result<TrainingResult> {
     let events: Vec<Value> = logs
         .lines()
         .filter_map(|line| serde_json::from_str(line).ok())
@@ -114,7 +124,21 @@ pub fn validate_worker(row: &Value, logs: &str) -> Result<TrainingResult> {
             "Reported objective/configuration differs from measured model training",
         ));
     }
-    if result.execution != "CPU, Rust; no GPU or simulated score"
+    let execution_valid = if gpu {
+        result.execution == "GPU, Rust CUDA; device training verified"
+            && result.gpu.as_ref().is_some_and(|p| {
+                !p.device_name.is_empty()
+                    && p.compute_capability[0] > 0
+                    && p.kernel_launches == 1
+                    && p.cuda_elapsed_ms.is_finite()
+                    && p.cuda_elapsed_ms > 0.
+                    && p.cpu_reference_max_abs_error.is_finite()
+                    && (0.0..=1e-10).contains(&p.cpu_reference_max_abs_error)
+            })
+    } else {
+        result.execution == "CPU, Rust; no GPU or simulated score" && result.gpu.is_none()
+    };
+    if !execution_valid
         || result.epochs != 40
         || result.history.len() != 40
         || !result.weight.is_finite()
@@ -147,15 +171,16 @@ pub fn run(root: &Path, options: &RunOptions) -> Result<Value> {
     } else {
         let runtime = kube_json(
             &options.kubeconfig,
+            options.gpu,
             &[
                 "get",
                 "clustertrainingruntime",
-                "optimizationjob-demo-cpu",
+                runtime_name(options.gpu),
                 "-o",
                 "json",
             ],
         )?;
-        if runtime.pointer("/spec/template/spec/replicatedJobs/0/template/spec/template/spec/containers/0/image").and_then(Value::as_str) != Some(TRAINING_IMAGE) {
+        if runtime.pointer("/spec/template/spec/replicatedJobs/0/template/spec/template/spec/containers/0/image").and_then(Value::as_str) != Some(training_image(options.gpu)) {
             return Err(invalid("Rust training runtime is not installed; run the start command first"));
         }
         let path = root.join("demo/optimizationjob.yaml");
@@ -164,11 +189,19 @@ pub fn run(root: &Path, options: &RunOptions) -> Result<Value> {
             .ok_or_else(|| invalid("Non-UTF8 manifest path"))?;
         let mut manifest = kube_json(
             &options.kubeconfig,
+            options.gpu,
             &["create", "--dry-run=client", "-f", path, "-o", "json"],
         )?;
         let name = new_job_name();
         manifest["metadata"]["name"] = json!(name);
-        kube(&options.kubeconfig, &["create", "-f", "-"], Some(&manifest))?;
+        manifest["spec"]["trainJobTemplate"]["spec"]["runtimeRef"]["name"] =
+            json!(runtime_name(options.gpu));
+        kube(
+            &options.kubeconfig,
+            options.gpu,
+            &["create", "-f", "-"],
+            Some(&manifest),
+        )?;
         name
     };
     println!("Watching real OptimizationJob {name}");
@@ -180,6 +213,7 @@ pub fn run(root: &Path, options: &RunOptions) -> Result<Value> {
         }
         let job = kube_json(
             &options.kubeconfig,
+            options.gpu,
             &[
                 "get",
                 "optimizationjob",
@@ -193,6 +227,7 @@ pub fn run(root: &Path, options: &RunOptions) -> Result<Value> {
         let label = format!("trainer.kubeflow.org/optimization-job={name}");
         let trial_list = kube_json(
             &options.kubeconfig,
+            options.gpu,
             &[
                 "get",
                 "trainjobs",
@@ -226,6 +261,7 @@ pub fn run(root: &Path, options: &RunOptions) -> Result<Value> {
     let mut report = summarize(&job, &trials)?;
     let pods = kube_json(
         &options.kubeconfig,
+        options.gpu,
         &["get", "pods", "-n", NAMESPACE, "-o", "json"],
     )?;
     let rows = report["trials"]
@@ -253,11 +289,26 @@ pub fn run(root: &Path, options: &RunOptions) -> Result<Value> {
         let pod = string(matched[0], "/metadata/name")?;
         let logs = kube(
             &options.kubeconfig,
+            options.gpu,
             &["logs", pod, "-n", NAMESPACE, "-c", "node"],
             None,
         )?;
         save(&options.output, &format!("{trial_name}.log"), &logs)?;
-        let trained = validate_worker(row, &logs)?;
+        if options.gpu
+            && matched[0]
+                .pointer("/spec/containers/0/resources/limits/nvidia.com~1gpu")
+                .and_then(Value::as_str)
+                != Some("1")
+        {
+            return Err(invalid(
+                "GPU evidence requires an actual Pod GPU resource allocation",
+            ));
+        }
+        let trained = validate_worker_mode(row, &logs, options.gpu)?;
+        if options.gpu {
+            row["gpu"] = serde_json::to_value(&trained.gpu)?;
+            row["gpu_resource_limit"] = json!(1);
+        }
         row["pod"] = json!(pod);
         row["history"] = serde_json::to_value(trained.history)?;
         row["weight"] = json!(trained.weight);
@@ -266,12 +317,16 @@ pub fn run(root: &Path, options: &RunOptions) -> Result<Value> {
     }
     report["best"] = report["trials"][0].clone();
     report["recorded_at"] = json!(chrono::Utc::now().to_rfc3339());
-    report["mode"] = json!("Real Kubernetes CPU run, Rust workload and tooling");
-    report["cluster"] = json!(CONTEXT);
+    report["mode"] = json!(if options.gpu {
+        "Real Kubernetes GPU run, Rust CUDA training"
+    } else {
+        "Real Kubernetes CPU run, Rust workload and tooling"
+    });
+    report["cluster"] = json!(context(options.gpu));
     report["training"] = json!(
         "64 training + 64 validation samples; 40 gradient descent epochs; y = 2x + 1 + noise"
     );
-    report["coverage"] = json!({"real_crd":true,"real_trainjobs":true,"real_optuna":true,"rust_push_metrics":true,"sdk_push_metrics":false,"new_sdk_submission_backend":false,"shared_initializer":false,"gpu":false});
+    report["coverage"] = json!({"real_crd":true,"real_trainjobs":true,"real_optuna":true,"rust_push_metrics":true,"sdk_push_metrics":false,"new_sdk_submission_backend":false,"shared_initializer":false,"gpu":options.gpu});
     let pins: Value = serde_json::from_slice(&fs::read(root.join("upstream.lock.json"))?)?;
     report["source_pins"] = pins["repositories"].clone();
     save_json(&options.output, "optimizationjob.json", &job)?;
@@ -320,6 +375,9 @@ fn go_binary() -> String {
 
 /// Reproduce the existing real cluster using unchanged pinned upstream sources.
 pub fn start(root: &Path, options: &RunOptions) -> Result<Value> {
+    if options.gpu {
+        return crate::gpu_cluster::start(root, options);
+    }
     if !cfg!(target_os = "linux") {
         return Err(invalid(
             "Run start under Linux or WSL with Docker, kind, kubectl and Go",
@@ -508,6 +566,7 @@ pub fn start(root: &Path, options: &RunOptions) -> Result<Value> {
     let overlay = root.join("demo/deploy");
     kube(
         &options.kubeconfig,
+        options.gpu,
         &["apply", "--server-side", "-k", path_text(&overlay)?],
         None,
     )?;
@@ -536,6 +595,7 @@ pub fn start(root: &Path, options: &RunOptions) -> Result<Value> {
     }
     kube(
         &options.kubeconfig,
+        options.gpu,
         &[
             "apply",
             "--server-side",
@@ -595,4 +655,29 @@ pub fn smoke(root: &Path, trainer: Option<&Path>, output: &Path) -> Result<()> {
 /// Keep enough name space for upstream Trial, JobSet and Pod suffixes.
 pub fn new_job_name() -> String {
     format!("rust-hpo-{}", chrono::Utc::now().timestamp_millis())
+}
+
+/// Select only one of the two dedicated demo contexts.
+pub fn context(gpu: bool) -> &'static str {
+    if gpu {
+        "kind-rubixkube-gpu"
+    } else {
+        CONTEXT
+    }
+}
+/// Distinct CPU and GPU runtimes preserve the original working CPU setup.
+pub fn runtime_name(gpu: bool) -> &'static str {
+    if gpu {
+        "rubixkube-demo-gpu"
+    } else {
+        "optimizationjob-demo-cpu"
+    }
+}
+/// A CUDA image can never be mistaken for the CPU image.
+pub fn training_image(gpu: bool) -> &'static str {
+    if gpu {
+        "rubixkube-training:cuda"
+    } else {
+        TRAINING_IMAGE
+    }
 }
