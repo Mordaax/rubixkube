@@ -21,3 +21,5 @@ pub enum Error {
 pub type Result<T> = std::result::Result<T, Error>;
 /// Construct a validation or execution error without exposing credentials.
 pub fn invalid(message: impl Into<String>) -> Error { Error::Invalid(message.into()) }
+pub mod metrics;
+pub mod process;
