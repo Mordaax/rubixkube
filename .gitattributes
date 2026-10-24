@@ -5,3 +5,7 @@
 *.py text eol=lf
 *.json text eol=lf
 *.md text eol=lf
+*.rs text eol=lf
+*.toml text eol=lf
+Cargo.lock text eol=lf
+Dockerfile.* text eol=lf

@@ -1,6 +1,12 @@
 use optimizationjob::metrics::{deliver, MetricsConfig};
 use serde_json::Value;
-use std::{io::{Read, Write}, net::TcpListener, sync::{mpsc, Arc}, thread, time::{Duration, Instant}};
+use std::{
+    io::{Read, Write},
+    net::TcpListener,
+    sync::{mpsc, Arc},
+    thread,
+    time::{Duration, Instant},
+};
 use tempfile::TempDir;
 
 struct Server {
@@ -14,9 +20,19 @@ fn server(statuses: Vec<u16>, hostname: &str) -> Server {
     let cert = rcgen::generate_simple_self_signed(vec!["localhost".into()]).unwrap();
     std::fs::write(dir.path().join("ca.pem"), cert.cert.pem()).unwrap();
     std::fs::write(dir.path().join("token"), "projected-secret\n").unwrap();
-    let tls = rustls::ServerConfig::builder_with_provider(Arc::new(rustls::crypto::ring::default_provider()))
-        .with_safe_default_protocol_versions().unwrap().with_no_client_auth()
-        .with_single_cert(vec![cert.cert.der().clone()], rustls::pki_types::PrivateKeyDer::Pkcs8(rustls::pki_types::PrivatePkcs8KeyDer::from(cert.key_pair.serialize_der()))).unwrap();
+    let tls = rustls::ServerConfig::builder_with_provider(Arc::new(
+        rustls::crypto::ring::default_provider(),
+    ))
+    .with_safe_default_protocol_versions()
+    .unwrap()
+    .with_no_client_auth()
+    .with_single_cert(
+        vec![cert.cert.der().clone()],
+        rustls::pki_types::PrivateKeyDer::Pkcs8(rustls::pki_types::PrivatePkcs8KeyDer::from(
+            cert.key_pair.serialize_der(),
+        )),
+    )
+    .unwrap();
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let port = listener.local_addr().unwrap().port();
     listener.set_nonblocking(true).unwrap();
@@ -27,36 +43,70 @@ fn server(statuses: Vec<u16>, hostname: &str) -> Server {
         while Instant::now() < deadline {
             match listener.accept() {
                 Ok((socket, _)) => {
-                    socket.set_read_timeout(Some(Duration::from_secs(1))).unwrap();
-                    socket.set_write_timeout(Some(Duration::from_secs(1))).unwrap();
+                    socket
+                        .set_read_timeout(Some(Duration::from_secs(1)))
+                        .unwrap();
+                    socket
+                        .set_write_timeout(Some(Duration::from_secs(1)))
+                        .unwrap();
                     let conn = rustls::ServerConnection::new(Arc::new(tls.clone())).unwrap();
                     let mut stream = rustls::StreamOwned::new(conn, socket);
                     let mut bytes = Vec::new();
                     let mut buf = [0u8; 4096];
                     loop {
-                        let n = match stream.read(&mut buf) { Ok(0) | Err(_) => break, Ok(n) => n };
+                        let n = match stream.read(&mut buf) {
+                            Ok(0) | Err(_) => break,
+                            Ok(n) => n,
+                        };
                         bytes.extend_from_slice(&buf[..n]);
                         if let Some(end) = bytes.windows(4).position(|w| w == b"\r\n\r\n") {
                             let head = String::from_utf8_lossy(&bytes[..end]);
-                            let length = head.lines().find_map(|line| line.to_lowercase().strip_prefix("content-length:").and_then(|s| s.trim().parse::<usize>().ok())).unwrap_or(0);
-                            if bytes.len() >= end + 4 + length { break; }
+                            let length = head
+                                .lines()
+                                .find_map(|line| {
+                                    line.to_lowercase()
+                                        .strip_prefix("content-length:")
+                                        .and_then(|s| s.trim().parse::<usize>().ok())
+                                })
+                                .unwrap_or(0);
+                            if bytes.len() >= end + 4 + length {
+                                break;
+                            }
                         }
                     }
-                    if bytes.is_empty() { return; }
+                    if bytes.is_empty() {
+                        return;
+                    }
                     send.send(String::from_utf8(bytes).unwrap()).unwrap();
                     let status = responses.next().unwrap_or(500);
                     let response = format!("HTTP/1.1 {status} Test\r\nContent-Length: 0\r\nConnection: close\r\nLocation: https://localhost:{port}/redirected\r\n\r\n");
                     let _ = stream.write_all(response.as_bytes());
                     let _ = stream.flush();
-                    if responses.len() == 0 { return; }
+                    if responses.len() == 0 {
+                        return;
+                    }
                 }
-                Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => thread::sleep(Duration::from_millis(10)),
+                Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                    thread::sleep(Duration::from_millis(10))
+                }
                 Err(_) => return,
             }
         }
     });
-    let config = MetricsConfig { url: format!("https://{hostname}:{port}/status"), ca_cert: dir.path().join("ca.pem"), token_path: dir.path().join("token"), attempts: 1, retry_delay: Duration::ZERO, request_timeout: Duration::from_secs(2) };
-    Server { dir, config, seen, worker }
+    let config = MetricsConfig {
+        url: format!("https://{hostname}:{port}/status"),
+        ca_cert: dir.path().join("ca.pem"),
+        token_path: dir.path().join("token"),
+        attempts: 1,
+        retry_delay: Duration::ZERO,
+        request_timeout: Duration::from_secs(2),
+    };
+    Server {
+        dir,
+        config,
+        seen,
+        worker,
+    }
 }
 
 #[test]
@@ -64,12 +114,19 @@ fn pushes_exact_trainer_payload_with_token_and_verified_tls() {
     let s = server(vec![200], "localhost");
     assert_eq!(deliver(&s.config, 0.007).unwrap(), 1);
     let request = s.seen.recv().unwrap();
-    assert!(request.to_lowercase().contains("authorization: bearer projected-secret"));
+    assert!(request
+        .to_lowercase()
+        .contains("authorization: bearer projected-secret"));
     assert!(request.starts_with("POST /status HTTP/1.1"));
     let payload: Value = serde_json::from_str(request.split_once("\r\n\r\n").unwrap().1).unwrap();
     assert_eq!(payload["trainerStatus"]["progressPercentage"], 100);
     assert_eq!(payload["trainerStatus"]["metrics"][0]["value"], "0.007");
-    assert!(chrono::DateTime::parse_from_rfc3339(payload["trainerStatus"]["lastUpdatedTime"].as_str().unwrap()).is_ok());
+    assert!(chrono::DateTime::parse_from_rfc3339(
+        payload["trainerStatus"]["lastUpdatedTime"]
+            .as_str()
+            .unwrap()
+    )
+    .is_ok());
     s.worker.join().unwrap();
 }
 

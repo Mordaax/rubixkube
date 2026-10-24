@@ -1,10 +1,6 @@
-FROM python:3.12-slim
-ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
-COPY trainer-api /build/trainer-api
-COPY katib-api /build/katib-api
-COPY sdk /build/sdk
-RUN pip install --no-cache-dir /build/trainer-api /build/katib-api /build/sdk
-COPY training.py /app/training.py
+# The launcher stages its own Linux Rust executable into this build context.
+FROM gcr.io/distroless/cc-debian12@sha256:9dac0a79194e45a7da0158a9c6da57b217585af0786db3845d1f0ec1a0dd182f
+COPY --chmod=0555 optimizationjob /app/optimizationjob
 USER 65532:65532
 WORKDIR /app
-ENTRYPOINT ["python", "/app/training.py"]
+ENTRYPOINT ["/app/optimizationjob", "train"]

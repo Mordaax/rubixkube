@@ -44,7 +44,7 @@ spec:
                       type: RuntimeDefault
                   containers:
                     - name: node
-                      image: optimizationjob-demo-training:local
+                      image: optimizationjob-demo-training:rust
                       imagePullPolicy: Never
                       resources:
                         requests:
@@ -77,3 +77,4 @@ spec:
       ports:
         - protocol: TCP
           port: 6789
+

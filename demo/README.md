@@ -1,103 +1,84 @@
-# A real OptimizationJob demo
+# Real Kubernetes demonstration with Rust
 
-The baseline result was a tested development starting point: pinned upstream code, a Git repository and repeatable tests. This demo adds a real local Kubernetes run so you can see the optimization loop working.
+## What runs
 
-## What is demonstrated
+1. Our Rust launcher verifies the pinned, clean upstream checkouts and prepares the dedicated `optimizationjob-demo` kind cluster.
+2. The unchanged Go Trainer controller and JobSet run in Kubernetes. The unchanged Katib Optuna provider supplies Random search suggestions.
+3. Our Rust runner submits a typed OptimizationJob with four trials, parallelism one, seed 42, and candidate learning rates `0.005`, `0.02`, `0.05`, `0.1`.
+4. Each real training Pod executes our Rust binary. It fits `prediction = weight*x + bias` for 40 full-batch gradient-descent epochs.
+5. The worker computes validation MSE on 64 held-out examples, then uses our Rust HTTPS client to push the final `val_loss` to Trainer. The projected CA, hostname and bearer token are verified; HTTP 200 is required before the worker reports success.
+6. The controller chooses the lowest measured loss. Our Rust runner independently checks the trial budget, completion conditions, finite metrics, winner ordering, successful Pods, complete Rust training history and acknowledgement event before saving the report.
 
-An actual `trainer.kubeflow.org/v1alpha1` OptimizationJob requests four trials, one at a time. The upstream controller starts an Optuna Random-search service, asks it for a learning rate, creates a TrainJob, and lets Trainer/JobSet run a CPU training Pod. That Pod fits a linear regression model, computes validation mean squared error, and pushes the metric through the Kubeflow SDK's authenticated HTTPS status endpoint. The controller records the successful trial with the smallest loss.
+Random search can repeat a candidate. Four trials do not guarantee that every candidate is sampled. The deterministic original dataset is stored in `fixtures/dataset.json`; `fixtures/parity.json` records the pre-migration Python results. Rust tests compare every epoch, coefficient and final loss to within an absolute `1e-12` tolerance. The rate `0.1` yields validation MSE approximately `0.0073170055` on that dataset.
 
-The model predicts `weight*x + bias` for synthetic data generated from `2*x + 1 + noise`. It starts from zero weights and trains for 40 gradient-descent epochs on 64 examples, then evaluates on 64 held-out examples. The measured objective is not a hardcoded score. A fixed dataset seed and identical initial weights make learning-rate comparisons meaningful.
-
-Random search can sample the same configuration more than once. In the first real run, rates were 0.02, 0.1, 0.1 and 0.005. Their final losses were approximately 0.39281249, 0.00731701, 0.00731701 and 1.26634172. The controller selected the earlier of the two tied best trials. The report independently checks the winner and matches each status metric to its successful Pod's training log and delivery acknowledgment.
-
-```mermaid
-flowchart LR
-  A[OptimizationJob: budget and search space] --> B[Optuna suggests learning rate]
-  B --> C[Controller creates typed TrainJob]
-  C --> D[Trainer + JobSet run a CPU Pod]
-  D --> E[Fit model and measure held-out loss]
-  E --> F[SDK pushes metric over HTTPS]
-  F --> G[TrainJob status stores objective]
-  G --> H[Controller compares successful trials]
-  H -->|budget remains| B
-  H -->|four completed| I[OptimizationJob status: best result]
-```
+The dataset is embedded in the Rust executable. It is shared as source data, not through a Kubernetes shared initializer or shared artifact volume.
 
 ## Run it
 
-Prerequisites are the pinned sibling checkouts from `upstream.lock.json`, the existing WSL Ubuntu-22.04 distro, Go compatible with Trainer's 1.27 directive, Docker, kind, kubectl, Bash and Python 3. No global package installation is performed by the launcher. Docker/registry/network access and several GB of free disk/RAM are required.
+Build with Rust 1.90.0 using the root README instructions. Inside the repository on Linux/WSL:
 
-From PowerShell:
-
-```powershell
-wsl -d Ubuntu-22.04 -- bash /mnt/h/GSocProjects/optimizationjob/demo/start.sh
+```text
+cargo run --locked --release -- start
+cargo run --locked --release -- run
+cargo run --locked --release -- run --existing RUST_JOB_NAME
+cargo run --locked --release -- serve
 ```
 
-It creates/reuses only `optimizationjob-demo`, uses a separate kubeconfig under the ignored `.tools/demo` directory, builds the pinned upstream controller and a small CPU training image, installs the upstream manifests, submits a uniquely named job, waits and produces a checked report. It refuses mismatched/dirty upstream checkouts. It does not change the current user kubeconfig or deploy to an existing unrelated context.
+`start` builds/reloads images and installs the runtime before creating a new job. `run` only submits or inspects a job in the existing installation, and refuses to submit if the Rust worker runtime is absent. Both accept `--kubeconfig`, `--output`, `--timeout` and `--existing`. For `start --existing`, the installation is refreshed before that existing job is checked. Old Python jobs are preserved but cannot be represented as verified Rust execution.
 
-To submit another job against the already running demo, without rebuilding images:
+`train --local --learning-rate 0.1` fits a model without Kubernetes and prints its actual loss history. It does not claim metric delivery. Inside a TrainJob, plain `train` reads the injected learning-rate environment variable and requires acknowledged delivery. The Kubernetes demonstration uses 40 epochs; custom epoch counts are available with `--local`.
 
-```powershell
-wsl -d Ubuntu-22.04 -- python3 /mnt/h/GSocProjects/optimizationjob/demo/run.py
+## Credentials and protocol
+
+The worker consumes the existing Trainer variables:
+
+- `KUBEFLOW_TRAINER_OPT_learning_rate`
+- `KUBEFLOW_TRAINER_SERVER_URL`
+- `KUBEFLOW_TRAINER_SERVER_CA_CERT`
+- `KUBEFLOW_TRAINER_SERVER_TOKEN`
+
+The HTTPS body has `trainerStatus.lastUpdatedTime`, `progressPercentage: 100`, and `metrics: [{name: "val_loss", value: "..."}]`. Tokens are reread for each attempt. Redirects and proxies are disabled. The request timeout is five seconds, with up to eight attempts and 5.5 seconds between failures. Only a final objective is sent, so repeated per-epoch updates and SDK throttling are unnecessary. Token values are never written into logs or reports.
+
+This is a protocol-compatible Rust client for this workload, not a port of every Python SDK API. The exact original contract comes from the pinned SDK `kubeflow/trainer/backends/kubernetes/utils.py` and Trainer status-server sources.
+
+## Evidence and browser walkthrough
+
+By default Rust writes `../optimizationjob-evidence/runs/rust/reports/`:
+
+- `report.json`: independently checked winner, trial metrics, coefficients, histories and coverage flags.
+- `optimizationjob.json` and `trainjobs.json`: actual observed resources.
+- One worker `.log` per trial, including `training_complete` and `metric_delivered` events.
+- `index.html`: interactive saved results; selecting a trial displays its measured learning curve.
+
+The saved page is not a live dashboard. `serve` binds only `127.0.0.1`, defaults to port 8765, and serves this report directory. It rejects traversal and symlink escapes. Supply `--port 8766` if an older report server is still using 8765. Kubeconfig is stored separately in `.tools/demo/kubeconfig` and is never served by default. Preserve a report run by choosing another `--output` directory before running again.
+
+## Compatibility and reproducibility
+
+The dedicated cluster/context and kubeconfig isolate this demo from other clusters. The launcher can restart its stopped single kind node after checking its kind cluster label. It does not start unrelated containers. If WSL shuts down when no foreground task is active, keep a WSL terminal open while inspecting the cluster.
+
+The pinned kind configuration keeps the existing Kubernetes 1.37/cgroup-v1 compatibility setting (`failCgroupV1: false`). Controller startup retains its certificate startup probe. Images are exported/imported only for linux/amd64 to avoid partial multi-platform OCI indexes.
+
+Rust toolchain, Cargo.lock, upstream revisions, node image, Optuna image and Rust worker runtime base are pinned. `Dockerfile.training` copies the invoked Linux executable into the pinned distroless C/C++ runtime; the worker is Rust and requires no Python runtime. The manager Dockerfile retains its original distroless base tag, so this demo does not claim a fully hermetic rebuild of all dependencies.
+
+Worker Pods run as UID 65532 with no privilege escalation, a read-only root filesystem, dropped capabilities and bounded CPU/memory. The existing NetworkPolicy is retained, but kind's default CNI does not enforce it. The upstream provider's internal gRPC remains unchanged. Use the cluster as a trusted local development demo.
+
+## Checks and cleanup
+
+```text
+cargo fmt --check
+cargo clippy --locked --all-targets --all-features -- -D warnings
+cargo test --locked
+cargo run --locked --release -- smoke
 ```
 
-To inspect the original completed run:
+The Rust suite covers numerical parity, objective selection/refusal paths, TLS authentication and certificate rejection, finite retries, corrupt/dirty Git source checks, process deadlines/large output, CLI and contained serving. `smoke` executes the actual pinned upstream Go packages and saves structured logs outside Git. Real Kubernetes acceptance is a separate executed check.
 
-```powershell
-wsl -d Ubuntu-22.04 -- python3 /mnt/h/GSocProjects/optimizationjob/demo/run.py --existing learning-rate-demo
-```
+GPU execution, shared initialization, Grid search, controller/provider crash recovery and a new SDK OptimizationJob backend have not been implemented by this conversion. It does not convert the upstream Go/Python projects or claim production readiness.
 
-Reports and logs are saved outside Git at `H:\GSocProjects\optimizationjob-evidence\runs\demo\reports`. `index.html` is a self-contained saved walkthrough with interactive learning curves and real results. It is not a live cluster dashboard.
-
-To serve it locally, from PowerShell:
-
-```powershell
-& H:\GSocProjects\optimizationjob\.venv\Scripts\python.exe -m http.server 8765 --bind 127.0.0.1 --directory H:\GSocProjects\optimizationjob-evidence\runs\demo\reports
-```
-
-Open [the walkthrough](http://127.0.0.1:8765). Only the report directory is served; private kubeconfig credentials are elsewhere.
-
-## Inspect the actual resources
-
-Open a WSL terminal and keep it open while exploring; this older WSL installation can shut down between detached host commands. A foreground keepalive was used during the demonstration. If the distro/daemon stopped, check the dedicated node rather than assuming the report proves it is still running.
-
-```bash
-export KUBECONFIG=/mnt/h/GSocProjects/optimizationjob/.tools/demo/kubeconfig
-kubectl --context kind-optimizationjob-demo get nodes
-kubectl --context kind-optimizationjob-demo -n optimizationjob-demo get optimizationjobs,trainjobs,pods
-kubectl --context kind-optimizationjob-demo -n optimizationjob-demo get optimizationjob learning-rate-demo -o yaml
-```
-
-Select an actual Pod name from that output to inspect worker logs with `kubectl logs -n optimizationjob-demo POD_NAME -c node`. `report.json`, `optimizationjob.json`, `trainjobs.json` and per-trial logs contain the saved proof.
-
-## Local compatibility fixes
-
-- The WSL Docker daemon uses cgroup v1. The demo's kind config sets `failCgroupV1: false` only in its kubelet configuration, the [documented temporary Kubernetes override](https://kubernetes.io/docs/concepts/architecture/cgroups/). It does not reconfigure the host. This is for a local compatibility demo, not the preferred production setup.
-- The node image is pinned to the cached Kubernetes 1.37 digest. Kind's generic all-platform image import failed against Docker's partial OCI indexes; the launcher exports only linux/amd64 before import.
-- Controller startup includes certificate generation/projection before status-server readiness. The demo adds a startup probe to avoid premature liveness restarts while certificates become available.
-- The training workload runs nonroot, without privilege escalation, with a read-only root filesystem and bounded resources. A namespace network-policy manifest permits same-namespace/provider traffic; kind's default CNI does not enforce NetworkPolicy, so this is not claimed as tested network isolation. The upstream suggestion service still uses insecure internal gRPC; keep this cluster local/trusted.
-
-## Boundaries
-
-This is real Kubernetes orchestration, model fitting and SDK push reporting using existing upstream components. It does **not** demonstrate GPU training, shared artifact initialization, controller/provider crash recovery, Grid search, or a new OptimizerClient submission backend. The current SDK still submits Experiments, so this demo deliberately submits the typed CRD using kubectl. The dataset is regenerated deterministically per trial; no shared initializer is being implied.
-
-It is an educational, runnable integration demo. It does not claim that a complete four-trial run proves all the planned controller safety and production requirements. No upstream product source was modified to make this run work.
-
-## Tests and cleanup
-
-```bash
-cd /mnt/h/GSocProjects/optimizationjob/demo
-python3 -m unittest discover -s tests -p '*_test.py' -v
-```
-
-The tests cover actual model learning/reproducibility and reporting's refusal of incomplete/nonfinite/wrong-winner results. The real cluster run supplies the integration evidence.
-
-Reproducibility boundary: upstream source revisions, the node digest and provider digest are pinned. The Python and distroless base images still use tags, and transitive Python dependencies are resolved when the training image is built. The executed image identities and resolved package versions are saved in external evidence; an exact uncached rebuild is not yet guaranteed. Pinning all base/dependency digests is a follow-up, not a claim of this demo.
-
-After inspecting the demo, this command removes **only its explicitly named disposable cluster**:
+To remove only this explicitly named disposable cluster after inspection:
 
 ```powershell
 wsl -d Ubuntu-22.04 -- kind delete cluster --name optimizationjob-demo
 ```
 
-It leaves source repositories and saved evidence intact. The demo cluster is left available for inspection after completion; cleanup is not run automatically.
+Stop the Rust `serve` process separately when finished. No cleanup is automatic.

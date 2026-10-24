@@ -687,6 +687,7 @@ dependencies = [
  "chrono",
  "clap",
  "nix",
+ "percent-encoding",
  "rcgen",
  "reqwest",
  "rustls",

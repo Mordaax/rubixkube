@@ -3,15 +3,29 @@ use serde_json::{json, Value};
 
 #[test]
 fn training_matches_all_original_python_results() {
-    let cases: Vec<Value> = serde_json::from_str(include_str!("../demo/fixtures/parity.json")).unwrap();
+    let cases: Vec<Value> =
+        serde_json::from_str(include_str!("../demo/fixtures/parity.json")).unwrap();
     for case in cases {
-        let result = serde_json::to_value(train(case["learning_rate"].as_f64().unwrap(), 40).unwrap()).unwrap();
+        let result =
+            serde_json::to_value(train(case["learning_rate"].as_f64().unwrap(), 40).unwrap())
+                .unwrap();
         for field in ["val_loss", "weight", "bias"] {
-            assert!((result[field].as_f64().unwrap() - case[field].as_f64().unwrap()).abs() < 1e-12);
+            assert!(
+                (result[field].as_f64().unwrap() - case[field].as_f64().unwrap()).abs() < 1e-12
+            );
         }
         assert_eq!(result["history"].as_array().unwrap().len(), 40);
-        for (actual, expected) in result["history"].as_array().unwrap().iter().zip(case["history"].as_array().unwrap()) {
-            assert!((actual["val_loss"].as_f64().unwrap() - expected["val_loss"].as_f64().unwrap()).abs() < 1e-12);
+        for (actual, expected) in result["history"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .zip(case["history"].as_array().unwrap())
+        {
+            assert!(
+                (actual["val_loss"].as_f64().unwrap() - expected["val_loss"].as_f64().unwrap())
+                    .abs()
+                    < 1e-12
+            );
         }
     }
 }
