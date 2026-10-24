@@ -1,0 +1,7 @@
+.git
+.tools
+.venv
+.superpowers
+target
+runs
+**/__pycache__

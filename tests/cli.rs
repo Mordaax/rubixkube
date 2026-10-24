@@ -1,4 +1,4 @@
-use optimizationjob::orchestrate::validate_worker;
+use rubixkube::orchestrate::validate_worker;
 use serde_json::json;
 use std::process::Command;
 #[test]
@@ -34,7 +34,7 @@ fn local_cli_emits_real_training_without_claiming_delivery() {
 }
 #[test]
 fn worker_evidence_requires_training_acknowledgement_and_consistent_loss() {
-    let trained = optimizationjob::training::train(0.1, 40).unwrap();
+    let trained = rubixkube::training::train(0.1, 40).unwrap();
     let mut event = serde_json::to_value(&trained).unwrap();
     event["event"] = json!("training_complete");
     let logs = format!(
@@ -55,7 +55,7 @@ fn worker_evidence_requires_training_acknowledgement_and_consistent_loss() {
 }
 #[test]
 fn generated_job_names_leave_room_for_upstream_trial_and_pod_suffixes() {
-    let name = optimizationjob::orchestrate::new_job_name();
+    let name = rubixkube::orchestrate::new_job_name();
     assert!(name.starts_with("rust-hpo-"));
     // Observed upstream suffix: -trial-xxxxxxxx-node-0-0-xxxxx (29 chars).
     assert!(name.len() + 29 <= 63, "{name}");

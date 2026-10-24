@@ -25,19 +25,31 @@ pub struct TrainingResult {
 /// Fit the original demo's fixed dataset using full-batch gradient descent.
 ///
 /// ```
-/// let fitted = optimizationjob::training::train(0.1, 40)?;
+/// let fitted = rubixkube::training::train(0.1, 40)?;
 /// assert!(fitted.val_loss < 0.02);
-/// # Ok::<(), optimizationjob::Error>(())
+/// # Ok::<(), rubixkube::Error>(())
 /// ```
 pub fn train(learning_rate: f64, epochs: usize) -> Result<TrainingResult> {
-    if !learning_rate.is_finite() || learning_rate <= 0. || learning_rate > 0.2 || epochs == 0 {
+    train_on(learning_rate, epochs, &crate::dataset::embedded()?)
+}
+/// Fit supplied finite x,y samples; first half trains, second half validates.
+pub fn train_on(
+    learning_rate: f64,
+    epochs: usize,
+    examples: &[[f64; 2]],
+) -> Result<TrainingResult> {
+    crate::dataset::validate(examples)?;
+    if !learning_rate.is_finite()
+        || learning_rate <= 0.
+        || learning_rate > 0.2
+        || epochs == 0
+        || epochs > 10000
+    {
         return Err(invalid(
             "Use a finite learning rate in (0, 0.2] and positive epochs",
         ));
     }
-    let examples: Vec<[f64; 2]> =
-        serde_json::from_str(include_str!("../demo/fixtures/dataset.json"))?;
-    let (training, validation) = examples.split_at(64);
+    let (training, validation) = examples.split_at(examples.len() / 2);
     let (mut weight, mut bias) = (0., 0.);
     let mut history = Vec::with_capacity(epochs);
     for epoch in 1..=epochs {
@@ -54,6 +66,11 @@ pub fn train(learning_rate: f64, epochs: usize) -> Result<TrainingResult> {
             .map(|[x, y]| (weight * x + bias - y).powi(2))
             .sum::<f64>()
             / validation.len() as f64;
+        if !weight.is_finite() || !bias.is_finite() || !val_loss.is_finite() {
+            return Err(invalid(
+                "Training diverged; normalize data or reduce the learning rate",
+            ));
+        }
         history.push(Observation { epoch, val_loss });
     }
     let val_loss = history

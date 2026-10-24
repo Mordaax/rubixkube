@@ -1,0 +1,5 @@
+trial,objective,value,parameters,cuda_training_verified
+"release-gpu-trial-gqqrss8b","validation_error",0.000003098439991444151,"{""epochs"":""100"",""learning_rate"":""0.1""}",true
+"release-gpu-trial-nprfjv2h","validation_error",0.0007703482942181449,"{""epochs"":""60"",""learning_rate"":""0.1""}",true
+"release-gpu-trial-6v776664","validation_error",0.0007703482942181449,"{""epochs"":""60"",""learning_rate"":""0.1""}",true
+"release-gpu-trial-qv4grwsz","validation_error",0.20650027935302123,"{""epochs"":""100"",""learning_rate"":""0.02""}",true

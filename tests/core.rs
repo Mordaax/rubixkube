@@ -1,4 +1,4 @@
-use optimizationjob::{report::summarize, training::train};
+use rubixkube::{report::summarize, training::train};
 use serde_json::{json, Value};
 
 #[test]

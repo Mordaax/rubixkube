@@ -1,0 +1,16 @@
+name: Rust checks
+on: [push, pull_request]
+permissions:
+  contents: read
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    container:
+      image: rust@sha256:cfb3f582db21e4b4168bffa96397db118d288f1c55026cf016911e147476184e
+    steps:
+      - uses: actions/checkout@v4
+      - run: cargo fmt --check
+      - run: cargo clippy --locked --all-targets --all-features -- -D warnings
+      - run: cargo test --locked --all-features
+      - run: cargo build --locked --release --bin rubixkube
+      - run: cargo package --locked --allow-dirty --no-verify

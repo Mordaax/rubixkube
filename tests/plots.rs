@@ -1,4 +1,4 @@
-use optimizationjob::plots::write_plots;
+use rubixkube::plots::write_plots;
 use serde_json::{json, Value};
 
 fn report() -> Value {

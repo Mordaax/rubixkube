@@ -1,0 +1,7 @@
+Job: release-gpu
+Metric: validation_error (Minimize)
+Trials: 4
+Winner: release-gpu-trial-gqqrss8b
+Value: 3.098439991444151e-6
+Parameters: {"epochs":"100","learning_rate":"0.1"}
+CUDA training verified: true

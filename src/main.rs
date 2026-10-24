@@ -1,12 +1,10 @@
-//! Command-line entry point for the Rust OptimizationJob demonstration.
+// Command-line entry point for RubixKube and its compatibility binary.
 use clap::{Parser, Subcommand};
-use optimizationjob::{
+use rubixkube::{
     invalid,
-    metrics::{deliver, MetricsConfig},
+    metrics::{deliver_metric, MetricsConfig},
     orchestrate::{self, RunOptions},
-    plots,
-    training::train,
-    Result,
+    plots, Result,
 };
 use serde_json::json;
 use std::{
@@ -19,7 +17,8 @@ use std::{
 #[derive(Parser)]
 #[command(
     version,
-    about = "Real Kubernetes HPO demo: Rust training, metrics and evidence tooling"
+    name = "rubixkube",
+    about = "Configurable Kubernetes hyperparameter optimization with CPU and CUDA workloads"
 )]
 struct Cli {
     /// Repository root (discovered from current directory or executable when omitted).
@@ -30,18 +29,31 @@ struct Cli {
 }
 #[derive(Subcommand)]
 enum Action {
+    #[command(flatten)]
+    Product(rubixkube::cli_product::Commands),
+    /// Generate shell completions for installation.
+    Completions {
+        #[arg(value_enum)]
+        shell: clap_complete::Shell,
+    },
     /// Fit the fixed dataset; report final loss to Trainer unless --local is set.
     Train {
         #[arg(long)]
         learning_rate: Option<f64>,
-        #[arg(long, default_value_t = 40)]
-        epochs: usize,
+        #[arg(long)]
+        epochs: Option<usize>,
         /// Train locally without claiming Kubernetes metric delivery.
         #[arg(long)]
         local: bool,
         /// Execution device; CUDA errors never fall back to CPU.
         #[arg(long, default_value = "cpu", value_parser = ["cpu","cuda"])]
         device: String,
+        /// CSV with x,y columns (first half training, second half validation).
+        #[arg(long)]
+        dataset: Option<PathBuf>,
+        /// Metric name reported to Trainer.
+        #[arg(long, default_value = "val_loss")]
+        metric: String,
     },
     /// Submit/watch a real job and save independently verified report artifacts.
     Run(RunArgs),
@@ -120,11 +132,18 @@ fn options(root: &Path, args: RunArgs) -> Result<RunOptions> {
 }
 fn execute(cli: Cli) -> Result<()> {
     match cli.command {
+        Action::Product(command) => rubixkube::cli_product::execute(command)?,
+        Action::Completions { shell } => {
+            use clap::CommandFactory;
+            clap_complete::generate(shell, &mut Cli::command(), "rubixkube", &mut io::stdout());
+        }
         Action::Train {
             learning_rate,
             epochs,
             local,
             device,
+            dataset,
+            metric,
         } => {
             let rate = match learning_rate {
                 Some(rate) => rate,
@@ -135,29 +154,44 @@ fn execute(cli: Cli) -> Result<()> {
                     .parse()
                     .map_err(|_| invalid("Learning rate must be numeric"))?,
             };
-            if !local && epochs != 40 {
-                return Err(invalid(
-                    "Kubernetes demo uses exactly 40 epochs; custom epochs require --local",
-                ));
-            }
+            let epochs = match epochs {
+                Some(n) => n,
+                None => env::var("KUBEFLOW_TRAINER_OPT_epochs")
+                    .ok()
+                    .map(|s| s.parse::<usize>())
+                    .transpose()
+                    .map_err(|_| invalid("epochs parameter must be a positive integer"))?
+                    .unwrap_or(40),
+            };
+            let samples = match &dataset {
+                Some(path) => rubixkube::dataset::read_csv(path)?,
+                None => rubixkube::dataset::embedded()?,
+            };
             let result = if device == "cuda" {
                 #[cfg(feature = "cuda")]
                 {
-                    optimizationjob::gpu::train_cuda(rate, epochs)?
+                    rubixkube::gpu::train_cuda_on(rate, epochs, &samples)?
                 }
                 #[cfg(not(feature = "cuda"))]
                 {
                     return Err(invalid("Rebuild with --features cuda to use GPU training"));
                 }
             } else {
-                train(rate, epochs)?
+                rubixkube::training::train_on(rate, epochs, &samples)?
             };
             let mut event = serde_json::to_value(&result)?;
             event["event"] = json!("training_complete");
+            event["objective_metric"] = json!(metric);
+            event["dataset_rows"] = json!(samples.len());
+            event["dataset_source"] = json!(dataset
+                .as_ref()
+                .map(|p| p.display().to_string())
+                .unwrap_or_else(|| "embedded".into()));
             println!("{event}");
             io::stdout().flush()?;
             if !local {
-                let attempt = deliver(&MetricsConfig::from_env()?, result.val_loss)?;
+                let attempt =
+                    deliver_metric(&MetricsConfig::from_env()?, &metric, result.val_loss)?;
                 println!("{}", json!({"event":"metric_delivered","attempt":attempt}));
                 io::stdout().flush()?;
             }

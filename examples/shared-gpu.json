@@ -1,0 +1,70 @@
+{
+  "version": 1,
+  "namespace": "optimizationjob-demo",
+  "runtime": {
+    "name": "rubixkube-demo-gpu",
+    "kind": "ClusterTrainingRuntime"
+  },
+  "workload": {
+    "image": "rubixkube-worker:0.2",
+    "command": [
+      "/app/rubixkube",
+      "train",
+      "--device",
+      "cuda"
+    ],
+    "args": [
+      "--dataset",
+      "/dataset/training.csv",
+      "--metric",
+      "validation_error"
+    ],
+    "env": {},
+    "secret_env": {}
+  },
+  "objective": {
+    "metric": "validation_error",
+    "direction": "Minimize"
+  },
+  "trials": 4,
+  "parallelism": 2,
+  "seed": 42,
+  "parameters": {
+    "learning_rate": {
+      "type": "categorical",
+      "choices": [
+        "0.02",
+        "0.1"
+      ]
+    },
+    "epochs": {
+      "type": "categorical",
+      "choices": [
+        "60",
+        "100"
+      ]
+    }
+  },
+  "resources": {
+    "cpu": "100m",
+    "memory": "256Mi",
+    "gpus": 1
+  },
+  "require_cuda_proof": true,
+  "shared_data": {
+    "storage": "1Gi",
+    "mount_path": "/dataset",
+    "initializer": {
+      "image": "busybox@sha256:bdf57e528e45e4433820e045b29b4597825a1c9e38353532d90a01445013f82e",
+      "command": [
+        "sh",
+        "-c",
+        "awk 'BEGIN {print \"x,y\"; for(i=0;i<256;i++){x=(i%64)/32-1; print x \",\" 3*x+0.5}}' > /dataset/training.csv"
+      ],
+      "args": [],
+      "env": {},
+      "secret_env": {}
+    }
+  },
+  "timeout_seconds": 600
+}

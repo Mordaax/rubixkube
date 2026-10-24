@@ -1,78 +1,105 @@
-# OptimizationJob — Rust integration demo
+# RubixKube 0.2
 
-This repository contains Rust training, authenticated metric delivery, Kubernetes demo orchestration, baseline tooling, report validation and tests. Upstream Kubeflow Trainer, SDK and Katib remain unchanged sibling dependencies pinned in `upstream.lock.json`.
+A Rust command-line tool for hyperparameter optimization on Kubeflow Trainer. Configure your training image, parameters and objective; submit a typed OptimizationJob; resume monitoring; and export independently checked results as JSON, CSV and static graphs. No web app.
 
-The CPU or optional CUDA GPU demo submits a real `trainer.kubeflow.org/v1alpha1` OptimizationJob. Four actual training Pods fit a linear model and report held-out loss. The upstream controller and Optuna choose the trials and winner. See [demo/README.md](demo/README.md) for the full walkthrough.
+The built-in workload supports CPU/CUDA linear training on user CSV data. Other models and frameworks run through your own container image and the same metric-reporting contract.
 
-## Source map
+## Install
 
-| File | Responsibility |
-|---|---|
-| `src/main.rs` | CLI: `train`, `run`, `start`, `smoke`, `plot` |
-| `src/training.rs` | Deterministic CPU model fitting and validation history |
-| `src/gpu.rs` | Actual CUDA training, device timing and CPU parity verification |
-| `src/gpu_cluster.rs` | Dedicated WSL GPU Kubernetes cluster setup |
-| `src/metrics.rs` | HTTPS metric push with projected CA and bearer token |
-| `src/process.rs` | Bounded external commands, source cleanliness/revision checks |
-| `src/report.rs` | Independent objective ranking and winner validation |
-| `src/orchestrate.rs` | Cluster installation, submission, evidence collection, baseline |
-| `src/plots.rs` | Standalone PNG/SVG graphs, CSV and text results |
-| `tests/*.rs` | Training parity, reports, TLS, Git guards, process deadlines, CLI and plot exports |
-| `demo/fixtures/` | Original dataset and pre-migration Python numerical references |
+Requires Rust 1.90.0 and `kubectl` on the client. An existing Kubernetes cluster must have compatible Kubeflow Trainer/OptimizationJob, JobSet and a suggestion provider installed. This release is tested against the revisions in `upstream.lock.json` on Kubernetes 1.37.
 
-Results are plain PNG/SVG graphs, CSV and JSON. No web app or HTTP server is included. YAML, JSON and Dockerfiles remain in their native formats. There is no owned Python or Bash implementation. Python/Go inside unchanged upstream dependencies were deliberately retained.
+```text
+cargo install --path . --locked --bin rubixkube
+# Include optional NVIDIA CUDA execution in the built-in workload:
+cargo install --path . --locked --features cuda --bin rubixkube
+rubixkube --version
+rubixkube completions powershell
+```
 
-## Build and check
+General experiment commands work without this repository or the sibling upstream clones after installation. The separate local-cluster `start`/`run`/`smoke` development helpers still require the workspace layout described in [the demo guide](demo/README.md).
 
-With Rust 1.90.0 and Git installed:
+## Run an experiment
+
+```text
+rubixkube init --file experiment.json
+# Edit the namespace, runtime, workload image, metric, parameters and resources.
+rubixkube validate --config experiment.json
+rubixkube doctor --config experiment.json --kubeconfig KUBECONFIG --context CONTEXT
+rubixkube submit --config experiment.json --name my-fit --wait --kubeconfig KUBECONFIG --context CONTEXT --output runs/my-fit
+```
+
+Use an explicit kubeconfig and context for every cluster command. Config-based commands use the config's namespace; other commands default to `default` unless `--namespace` is supplied. An explicit namespace conflicting with the config is rejected.
+
+```text
+rubixkube status my-fit --namespace NAMESPACE --kubeconfig KUBECONFIG --context CONTEXT
+rubixkube list --namespace NAMESPACE --kubeconfig KUBECONFIG --context CONTEXT
+rubixkube logs my-fit --namespace NAMESPACE --kubeconfig KUBECONFIG --context CONTEXT
+rubixkube watch my-fit --namespace NAMESPACE --kubeconfig KUBECONFIG --context CONTEXT --output runs/my-fit
+rubixkube results my-fit --namespace NAMESPACE --kubeconfig KUBECONFIG --context CONTEXT --output runs/my-fit
+rubixkube plot --report runs/my-fit/report.json
+```
+
+`submit` refuses duplicate job names. A watch timeout or interruption leaves Kubernetes work running; `watch` resumes without submitting more trials. Progress goes to stderr and command data to stdout as JSON. Completed results include the sampled parameters, objective ranking, raw resources, Pod logs and optional checked CUDA evidence.
+
+```text
+# Remove a managed run and its derived runtime, retaining the shared PVC:
+rubixkube cancel my-fit --namespace NAMESPACE --kubeconfig KUBECONFIG --context CONTEXT
+# Explicitly delete its retained shared data as well (also works after cancellation):
+rubixkube cancel my-fit --purge-shared-data --namespace NAMESPACE --kubeconfig KUBECONFIG --context CONTEXT
+```
+
+Cancellation refuses foreign resources. RubixKube labels/config records are ownership safeguards, not a multi-tenant authorization boundary; use Kubernetes RBAC and trusted namespaces.
+
+## Configuration and workloads
+
+[Configuration reference](docs/configuration.md) · [Workload/metric contract](docs/workloads.md) · [Shared-data GPU example](examples/shared-gpu.json)
+
+Supported searches are Random with categorical, uniform and log-uniform parameters, a configurable seed, 1–100 trials and configurable parallelism. Objectives support Minimize and Maximize. The pinned upstream controller does not implement Grid; floating log-uniform minima below `1e-10` are rejected because the pinned provider cannot preserve them.
+
+A workload receives sampled values as `KUBEFLOW_TRAINER_OPT_<parameter>`. Report the final finite metric before the worker exits:
+
+```text
+rubixkube report --metric accuracy --value 0.94
+```
+
+This uses the controller-projected HTTPS endpoint, CA and bearer token. It requires exact HTTP 200 acknowledgement, validates TLS/hostname, disables redirects and never prints the token. You may also report through the upstream SDK or this crate's `metrics::deliver_metric` API. Use Secret references rather than inline credentials in experiment configuration.
+
+## Shared initialization and GPU
+
+An optional initializer runs once in a Kubernetes Job, writing a run-specific PVC. Only after it completes does RubixKube submit optimization trials with that PVC mounted read-only. Retry the same name/config after an interrupted initialization to reuse completed work; failed initialization prevents submission. PVC data is retained by default. Shared initialization currently requires a single-node runtime with a trainer container named `node` and permission to create the derived runtime and PVC.
+
+The built-in trainer accepts `--dataset data.csv`, `--epochs N`, `--learning-rate R` and `--device cpu|cuda`. CSV has two finite numeric columns, `x,y`, with at least four rows; its first half trains and second half validates. `epochs` and `learning_rate` can also be supplied by optimization environment variables. CUDA computes all gradients, updates and validation on-device, synchronizes, and compares every result against CPU; failure never falls back to CPU.
+
+[Local WSL GPU setup](demo/gpu/README.md) uses a dedicated cluster and your existing Windows GPU driver. For an existing Linux GPU cluster, choose its GPU-enabled runtime and worker image instead. The setup helper's WSL paths are not a general-purpose GPU operator.
+
+## Executed acceptance
+
+A real Kubernetes experiment used one initializer, a shared 256-row CSV for `y = 3x + 0.5`, two parameters (`learning_rate`, `epochs`), a custom `validation_error` objective and four actual RTX 5060 Ti training Pods. CPU/GPU numerical parity and final metrics were verified. Parallelism two on one GPU queued workers until the device was free; this is normal scheduling, not additional GPU capacity.
+
+The earlier [GPU graphs](demo/results/gpu/) show the original fixed-dataset run. v0.2 acceptance evidence is saved outside Git; current example results are documented in the release notes. All graphs are static files.
+
+## Build, checks and containers
 
 ```text
 cargo fmt --check
 cargo clippy --locked --all-targets --all-features -- -D warnings
 cargo test --locked
-cargo build --locked --release
-cargo run --locked -- train --local --learning-rate 0.1
+cargo test --locked --all-features
+cargo package --locked --allow-dirty --no-verify
 ```
 
-The full demo requires Linux/WSL, Docker, kind, kubectl, Go compatible with the pinned Trainer revision, and the three sibling source checkouts. It does not need a local Python installation. `GO_BINARY` can select the Go executable. In the prepared WSL environment it defaults to `/usr/local/go/bin/go`.
+Actual CUDA tests are opt-in and require a real GPU and NVRTC libraries; see the GPU guide. CI compiles CUDA support and runs hardware-independent tests, not GPU execution. Linux/WSL is the tested platform; native Windows/macOS operation is not certified by these checks.
 
-For this Windows workspace, a compiled Linux executable is staged at `.tools/rust/optimizationjob`:
+The root Dockerfile builds non-root CPU/CUDA worker images (`--target cpu` or `--target cuda`). Those images provide training and metric-reporting commands; cluster lifecycle commands need an external `kubectl` executable. The source and generated binary include bundled-font notices; `rubixkube licenses` prints them. Cargo.lock, runtime images and the development toolchain are pinned. Cluster/driver availability and image-registry access remain deployment prerequisites.
 
-```powershell
-wsl -d Ubuntu-22.04 -- /mnt/h/GSocProjects/optimizationjob/.tools/rust/optimizationjob start
-wsl -d Ubuntu-22.04 -- /mnt/h/GSocProjects/optimizationjob/.tools/rust/optimizationjob run
-wsl -d Ubuntu-22.04 -- /mnt/h/GSocProjects/optimizationjob/.tools/rust/optimizationjob smoke
-wsl -d Ubuntu-22.04 -- /mnt/h/GSocProjects/optimizationjob/.tools/rust/optimizationjob plot --report /mnt/h/GSocProjects/optimizationjob-evidence/runs/rust/reports/report.json
-```
+## Release scope
 
-The executable discovers the repository from its own path. Supply `--root` when running a binary installed elsewhere. `plot --report PATH` exports graphs and CSV beside a saved report; use `--output DIRECTORY` to choose another location.
+This is a usable local single-node HPO tool, not a claim that the original 350-hour upstream project is production-complete. Upstream Trainer/JobSet/Optuna remain dependencies. Multi-tenant hardening, high availability, native multi-node/shared-volume topologies and controller/provider crash-recovery guarantees are outside v0.2. The Python Kubeflow SDK OptimizerClient backend was not rewritten; RubixKube submits the new CRD through its own typed configuration client.
 
-## Isolated Docker build without installing Rust
+Local reproducible workflow: [shared-data GPU quickstart](docs/quickstart.md).
 
-Run these commands inside WSL from `/mnt/h/GSocProjects/optimizationjob`. The official Rust build image is pinned by digest. Named volumes hold Cargo downloads and compilation output; the source remains on H:.
+## Packaged-worker result
 
-```bash
-docker run --rm -v "$PWD:/work" -v optimizationjob-rust-target:/target -v optimizationjob-rust-cargo:/usr/local/cargo/registry -e CARGO_TARGET_DIR=/target -w /work rust@sha256:cfb3f582db21e4b4168bffa96397db118d288f1c55026cf016911e147476184e cargo test --locked
-docker run --rm -v "$PWD:/work" -v optimizationjob-rust-target:/target -v optimizationjob-rust-cargo:/usr/local/cargo/registry -e CARGO_TARGET_DIR=/target -w /work rust@sha256:cfb3f582db21e4b4168bffa96397db118d288f1c55026cf016911e147476184e cargo build --locked --release
-mkdir -p .tools/rust
-docker run --rm -v "$PWD:/work" -v optimizationjob-rust-target:/target rust@sha256:cfb3f582db21e4b4168bffa96397db118d288f1c55026cf016911e147476184e cp /target/release/optimizationjob /work/.tools/rust/optimizationjob
-.tools/rust/optimizationjob start
-```
+The repository Dockerfile's packaged CUDA worker also completed four real trials with a shared initializer, custom CSV, searched epoch counts and the custom objective. The recorded results are available as [CSV](examples/results/shared-gpu/results.csv) and a [run summary](examples/results/shared-gpu/summary.txt).
 
-The `start` command packages the executable you invoke as the non-root training image. Use a release Linux x86_64 build for the pinned amd64 cluster. Kubernetes credentials, local executables, environments and raw evidence stay ignored. Plans live in `../optimizationjob-plan`; current Rust results live in `../optimizationjob-evidence/runs/rust/`. Previous Python demo evidence is preserved separately in `runs/demo/`.
-
-## Scope
-
-This is a real integration demonstration, not a new Rust implementation of the upstream OptimizationJob controller or SDK. Optional real GPU execution is available with `--features cuda` and `start --gpu`; see [the GPU guide](demo/gpu/README.md). Shared initialization, a new OptimizerClient backend and production crash-recovery guarantees remain outside this demo. The metrics client implements Trainer's existing protocol directly; the Python SDK is not executed by the Rust worker.
-
-## Measured GPU results
-
-These simple plots come from four real CUDA training Pods on the local RTX 5060 Ti. The winner used learning rate 0.1 and measured validation MSE 0.0073170055. Every trial completed a CUDA kernel, matched the CPU reference and delivered its metric. This tiny workload demonstrates correctness, not GPU speedup.
-
-![Validation loss by epoch](demo/results/gpu/loss-by-epoch.png)
-
-![Final validation loss by trial](demo/results/gpu/trial-results.png)
-
-[Numeric results](demo/results/gpu/results.csv) � [Run summary](demo/results/gpu/summary.txt)
-
-The exporter uses Plotters and bundles DejaVu Sans so headless PNG exports need no system font installation. Font licensing is in `assets/FONT-LICENSE.txt`.
+![Measured shared-data GPU objective](examples/results/shared-gpu/objective.png)

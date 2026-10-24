@@ -32,3 +32,16 @@ pub mod process;
 pub mod gpu;
 
 pub mod gpu_cluster;
+
+pub mod config;
+pub mod experiment_report;
+
+pub mod cluster;
+pub mod shared;
+
+pub mod experiment;
+pub mod experiment_plots;
+
+pub mod dataset;
+
+pub mod cli_product;

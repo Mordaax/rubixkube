@@ -1,4 +1,4 @@
-use optimizationjob::process::{checked, verify_checkout};
+use rubixkube::process::{checked, verify_checkout};
 use std::{
     process::Command,
     time::{Duration, Instant},
@@ -81,7 +81,7 @@ fn drains_large_output_without_pipe_deadlock() {
 
 #[test]
 fn readiness_retries_startup_errors_but_has_a_finite_deadline() {
-    use optimizationjob::{invalid, process::wait_for};
+    use rubixkube::{invalid, process::wait_for};
     let mut attempts = 0;
     wait_for(Duration::from_secs(1), Duration::from_millis(1), |_| {
         attempts += 1;

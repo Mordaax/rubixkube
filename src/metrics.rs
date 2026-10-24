@@ -39,6 +39,13 @@ impl MetricsConfig {
 /// Certificate and hostname verification are mandatory. Redirects and proxies
 /// are disabled so projected credentials go only to the configured endpoint.
 pub fn deliver(config: &MetricsConfig, loss: f64) -> Result<usize> {
+    deliver_metric(config, "val_loss", loss)
+}
+/// Report any finite named objective through Trainer's authenticated status API.
+pub fn deliver_metric(config: &MetricsConfig, metric: &str, loss: f64) -> Result<usize> {
+    if !crate::config::metric_name(metric) {
+        return Err(invalid("Invalid objective metric name"));
+    }
     if !loss.is_finite()
         || config.attempts == 0
         || config.attempts > 8
@@ -76,7 +83,7 @@ pub fn deliver(config: &MetricsConfig, loss: f64) -> Result<usize> {
         let payload = json!({"trainerStatus":{
             "lastUpdatedTime":chrono::Utc::now().to_rfc3339(),
             "progressPercentage":100,
-            "metrics":[{"name":"val_loss","value":loss.to_string()}]
+            "metrics":[{"name":metric,"value":loss.to_string()}]
         }});
         match client
             .post(url.clone())

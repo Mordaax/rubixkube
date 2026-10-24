@@ -1,4 +1,4 @@
-use optimizationjob::metrics::{deliver, MetricsConfig};
+use rubixkube::metrics::{deliver, MetricsConfig};
 use serde_json::Value;
 use std::{
     io::{Read, Write},
@@ -180,4 +180,18 @@ fn validates_configuration_before_network_access() {
     s.config.url = "https://localhost/status".into();
     std::fs::write(&s.config.ca_cert, "invalid certificate").unwrap();
     assert!(deliver(&s.config, 0.1).is_err());
+}
+
+#[test]
+fn custom_metric_uses_the_same_authenticated_protocol() {
+    let s = server(vec![200], "localhost");
+    assert_eq!(
+        rubixkube::metrics::deliver_metric(&s.config, "accuracy", 0.94).unwrap(),
+        1
+    );
+    let request = s.seen.recv().unwrap();
+    let payload: Value = serde_json::from_str(request.split_once("\r\n\r\n").unwrap().1).unwrap();
+    assert_eq!(payload["trainerStatus"]["metrics"][0]["name"], "accuracy");
+    assert_eq!(payload["trainerStatus"]["metrics"][0]["value"], "0.94");
+    s.worker.join().unwrap();
 }

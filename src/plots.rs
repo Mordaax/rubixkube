@@ -15,7 +15,7 @@ struct Trial {
 fn plot_error(error: impl std::fmt::Debug) -> crate::Error {
     invalid(format!("Plot rendering failed: {error:?}"))
 }
-fn font() -> Result<()> {
+pub(crate) fn font() -> Result<()> {
     static FONT: OnceLock<std::result::Result<(), String>> = OnceLock::new();
     FONT.get_or_init(|| {
         plotters::style::register_font(
@@ -168,6 +168,9 @@ fn csv(value: &str) -> String {
 /// Export two PNG/SVG plots, numeric CSV, and a short text summary.
 /// Reads recorded observations only; never reruns or simulates training.
 pub fn write_plots(report: &Value, output: &Path) -> Result<()> {
+    if report["schema_version"] == 2 {
+        return crate::experiment_plots::write(report, output);
+    }
     if report["winner_verified"] != true {
         return Err(invalid(
             "Only independently verified results can be plotted",
