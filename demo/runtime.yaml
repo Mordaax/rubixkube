@@ -1,0 +1,79 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: optimizationjob-demo
+  labels:
+    app.kubernetes.io/part-of: optimizationjob-demo
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: demo-training
+  namespace: optimizationjob-demo
+---
+apiVersion: trainer.kubeflow.org/v1alpha1
+kind: ClusterTrainingRuntime
+metadata:
+  name: optimizationjob-demo-cpu
+  labels:
+    app.kubernetes.io/part-of: optimizationjob-demo
+spec:
+  mlPolicy:
+    numNodes: 1
+  template:
+    spec:
+      replicatedJobs:
+        - name: node
+          replicas: 1
+          template:
+            metadata:
+              labels:
+                trainer.kubeflow.org/trainjob-ancestor-step: trainer
+            spec:
+              parallelism: 1
+              completions: 1
+              backoffLimit: 0
+              template:
+                spec:
+                  serviceAccountName: demo-training
+                  restartPolicy: Never
+                  securityContext:
+                    runAsNonRoot: true
+                    runAsUser: 65532
+                    seccompProfile:
+                      type: RuntimeDefault
+                  containers:
+                    - name: node
+                      image: optimizationjob-demo-training:local
+                      imagePullPolicy: Never
+                      resources:
+                        requests:
+                          cpu: 100m
+                          memory: 96Mi
+                        limits:
+                          cpu: "1"
+                          memory: 256Mi
+                      securityContext:
+                        allowPrivilegeEscalation: false
+                        readOnlyRootFilesystem: true
+                        capabilities:
+                          drop: ["ALL"]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: demo-namespace-boundary
+  namespace: optimizationjob-demo
+spec:
+  podSelector: {}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector: {}
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kubeflow-system
+      ports:
+        - protocol: TCP
+          port: 6789

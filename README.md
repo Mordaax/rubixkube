@@ -4,6 +4,16 @@ This repository holds reproducible local development tooling and pinned upstream
 
 The planning package is outside this repository at `H:\GSocProjects\optimizationjob-plan` and is not tracked. Evidence and session records are outside it at `H:\GSocProjects\optimizationjob-evidence`. The upstream Git checkouts are siblings under `H:\GSocProjects\kubeflow`.
 
+## Real Kubernetes demo
+
+The [full demo guide](demo/README.md) explains the orchestration logic, measured results, source code, inspection commands and cleanup. Run its complete CPU workflow from PowerShell:
+
+```powershell
+wsl -d Ubuntu-22.04 -- bash /mnt/h/GSocProjects/optimizationjob/demo/start.sh
+```
+
+It uses the upstream OptimizationJob controller, Optuna, Trainer/JobSet, real linear-regression training and SDK metric push. The report independently checks the controller's winner against measured losses and worker delivery logs. Shared initialization, GPU execution and a new SDK submission backend remain outside this demo. See the guide for prerequisites and the local compatibility settings.
+
 ## Reproduce the Go baseline
 
 From PowerShell:
@@ -31,17 +41,17 @@ python3 -m unittest discover -s tests -p '*_test.py' -v
 
 These use real temporary Git repositories to verify that dirty checkouts, corrupt indexes and revision mismatches cannot proceed to Go execution.
 
-## Observed starting point
+## Observed starting point at the first baseline
 
 - Trainer already includes the typed `trainer.kubeflow.org/v1alpha1` OptimizationJob CRD, controller and generated clients. It currently orchestrates Random search; the schema exposes Grid but the controller rejects it.
 - The SDK's existing optimizer still creates Katib Experiments. Its public `OptimizationJob` naming is not proof it submits the Trainer resource.
 - Status push plumbing exists through `kubeflow.trainer.update_trainjob_status`; its current boolean/throttling behavior needs reconciliation with objective reporting guarantees.
 - Shared model/dataset artifact publication across optimization trials is not established by this baseline.
-- All three source revisions are recorded. Their joint deployment compatibility, a real provider restart, SDK test environment, API-server validation and end-to-end training are not yet verified.
+- All three source revisions were recorded. The later demo verifies their narrow Random-search CPU integration; it does not prove provider restart recovery, all API validation cases or the remaining planned features.
 
-## Local environment
+## Original baseline environment
 
-Windows and Ubuntu-22.04 on WSL2 can see the RTX 5060 Ti (16,311 MiB). WSL has Go 1.27.3 and a working Docker 29.1.3 daemon; Windows Docker Desktop's daemon is unavailable. Neither checked environment has a Kubernetes context. WSL has neither Make nor GCC on PATH, Python 3.10 has no pip/ensurepip, and uv is not installed. Docker's registered runtimes do not include NVIDIA. No cluster installation or GPU tensor execution was performed in this baseline.
+Windows and Ubuntu-22.04 on WSL2 can see the RTX 5060 Ti (16,311 MiB). WSL has Go 1.27.3 and a working Docker 29.1.3 daemon; Windows Docker Desktop's daemon was unavailable. Neither environment had a Kubernetes context at the first baseline. The later demo adds a dedicated kind cluster/private kubeconfig. WSL had neither Make nor GCC on PATH, Python 3.10 had no pip/ensurepip, and uv was not installed. Docker's registered runtimes did not include NVIDIA. The demo uses CPU; no GPU tensor execution is claimed.
 
 An ignored Windows Python 3.13 venv now holds editable installations of the three pinned local SDK/API sources and minimal pytest dependencies. Its existing optimizer unit suite passes (50 tests). Reproduce from PowerShell, after restoring that environment from the external evidence's installation/dependency records:
 

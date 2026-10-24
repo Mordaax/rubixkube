@@ -1,0 +1,29 @@
+apiVersion: trainer.kubeflow.org/v1alpha1
+kind: OptimizationJob
+metadata:
+  name: learning-rate-demo
+  namespace: optimizationjob-demo
+  labels:
+    app.kubernetes.io/part-of: optimizationjob-demo
+spec:
+  objectives:
+    - metric: val_loss
+      direction: Minimize
+  searchAlgorithm:
+    random:
+      seed: 42
+  parameters:
+    - name: learning_rate
+      searchSpace:
+        categorical:
+          choices: ["0.005", "0.02", "0.05", "0.1"]
+  numTrials: 4
+  parallelTrials: 1
+  trainJobTemplate:
+    spec:
+      runtimeRef:
+        name: optimizationjob-demo-cpu
+        kind: ClusterTrainingRuntime
+        apiGroup: trainer.kubeflow.org
+      trainer:
+        numNodes: 1
