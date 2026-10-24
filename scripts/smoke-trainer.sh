@@ -17,7 +17,8 @@ if [[ "$actual_sha" != "$expected_sha" ]]; then
   echo "Trainer revision differs from upstream.lock.json; review the new baseline first." >&2
   exit 2
 fi
-if [[ -n "$(git -C "$trainer_root" status --porcelain)" ]]; then
+checkout_status=$(git -C "$trainer_root" status --porcelain)
+if [[ -n "$checkout_status" ]]; then
   echo "Trainer has local changes; use a clean checkout for a baseline measurement." >&2
   exit 2
 fi
