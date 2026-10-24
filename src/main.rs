@@ -4,7 +4,7 @@ use optimizationjob::{
     invalid,
     metrics::{deliver, MetricsConfig},
     orchestrate::{self, RunOptions},
-    serve,
+    plots,
     training::train,
     Result,
 };
@@ -54,12 +54,12 @@ enum Action {
         #[arg(long)]
         output: Option<PathBuf>,
     },
-    /// Serve saved results on 127.0.0.1 with path containment.
-    Serve {
+    /// Export simple PNG/SVG plots and CSV from a saved verified report.
+    Plot {
         #[arg(long)]
-        directory: Option<PathBuf>,
-        #[arg(long, default_value_t = 8765)]
-        port: u16,
+        report: PathBuf,
+        #[arg(long)]
+        output: Option<PathBuf>,
     },
 }
 #[derive(clap::Args)]
@@ -179,12 +179,12 @@ fn execute(cli: Cli) -> Result<()> {
             );
             orchestrate::smoke(&root, trainer.as_deref(), &output)?;
         }
-        Action::Serve { directory, port } => {
-            let directory = match directory {
-                Some(path) => path,
-                None => orchestrate::report_directory(&root(cli.root)?)?,
-            };
-            serve::serve(&directory, port)?;
+        Action::Plot { report, output } => {
+            let data = serde_json::from_slice(&std::fs::read(&report)?)?;
+            let directory =
+                output.unwrap_or_else(|| report.parent().unwrap_or(Path::new(".")).to_path_buf());
+            plots::write_plots(&data, &directory)?;
+            println!("Saved plots and results to {}", directory.display());
         }
     }
     Ok(())

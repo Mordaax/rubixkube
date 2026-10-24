@@ -21,7 +21,7 @@ Build with Rust 1.90.0 using the root README instructions. Inside the repository
 cargo run --locked --release -- start
 cargo run --locked --release -- run
 cargo run --locked --release -- run --existing RUST_JOB_NAME
-cargo run --locked --release -- serve
+cargo run --locked --release -- plot --report ../optimizationjob-evidence/runs/rust/reports/report.json
 ```
 
 `start` builds/reloads images and installs the runtime before creating a new job. `run` only submits or inspects a job in the existing installation, and refuses to submit if the Rust worker runtime is absent. Both accept `--kubeconfig`, `--output`, `--timeout` and `--existing`. For `start --existing`, the installation is refreshed before that existing job is checked. Old Python jobs are preserved but cannot be represented as verified Rust execution.
@@ -41,16 +41,18 @@ The HTTPS body has `trainerStatus.lastUpdatedTime`, `progressPercentage: 100`, a
 
 This is a protocol-compatible Rust client for this workload, not a port of every Python SDK API. The exact original contract comes from the pinned SDK `kubeflow/trainer/backends/kubernetes/utils.py` and Trainer status-server sources.
 
-## Evidence and browser walkthrough
+## Graphs and recorded results
 
 By default Rust writes `../optimizationjob-evidence/runs/rust/reports/`:
 
 - `report.json`: independently checked winner, trial metrics, coefficients, histories and coverage flags.
 - `optimizationjob.json` and `trainjobs.json`: actual observed resources.
 - One worker `.log` per trial, including `training_complete` and `metric_delivered` events.
-- `index.html`: interactive saved results; selecting a trial displays its measured learning curve.
+- `loss-by-epoch.png` / `.svg`: measured validation loss by epoch for every trial.
+- `trial-results.png` / `.svg`: final measured validation loss by trial.
+- `results.csv` and `summary.txt`: numeric results and a short run summary.
 
-The saved page is not a live dashboard. `serve` binds only `127.0.0.1`, defaults to port 8765, and serves this report directory. It rejects traversal and symlink escapes. Supply `--port 8766` if an older report server is still using 8765. Kubeconfig is stored separately in `.tools/demo/kubeconfig` and is never served by default. Preserve a report run by choosing another `--output` directory before running again.
+The run command exports standalone files, with no web app or server. `plot --report PATH --output DIRECTORY` regenerates the plots from a saved verified report without accessing Kubernetes. Kubeconfig remains separate at `.tools/demo/kubeconfig`. Preserve a report run by choosing another `--output` directory before running again.
 
 ## Compatibility and reproducibility
 
@@ -71,7 +73,7 @@ cargo test --locked
 cargo run --locked --release -- smoke
 ```
 
-The Rust suite covers numerical parity, objective selection/refusal paths, TLS authentication and certificate rejection, finite retries, corrupt/dirty Git source checks, process deadlines/large output, CLI and contained serving. `smoke` executes the actual pinned upstream Go packages and saves structured logs outside Git. Real Kubernetes acceptance is a separate executed check.
+The Rust suite covers numerical parity, objective selection/refusal paths, TLS authentication and certificate rejection, finite retries, corrupt/dirty Git source checks, process deadlines/large output, CLI and static plot exports. `smoke` executes the actual pinned upstream Go packages and saves structured logs outside Git. Real Kubernetes acceptance is a separate executed check.
 
 This page documents the CPU path. An optional CUDA backend and separate GPU Kubernetes demo are documented in [gpu/README.md](gpu/README.md). Shared initialization, Grid search, controller/provider crash recovery and a new SDK OptimizationJob backend remain unfinished. It does not convert the upstream Go/Python projects or claim production readiness.
 
@@ -81,4 +83,4 @@ To remove only this explicitly named disposable cluster after inspection:
 wsl -d Ubuntu-22.04 -- kind delete cluster --name optimizationjob-demo
 ```
 
-Stop the Rust `serve` process separately when finished. No cleanup is automatic.
+No cleanup is automatic.

@@ -25,8 +25,8 @@ pub fn invalid(message: impl Into<String>) -> Error {
 }
 pub mod metrics;
 pub mod orchestrate;
+pub mod plots;
 pub mod process;
-pub mod serve;
 
 #[cfg(feature = "cuda")]
 pub mod gpu;

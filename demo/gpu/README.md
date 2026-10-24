@@ -21,7 +21,7 @@ A compiled CUDA-enabled executable is staged at `.tools/gpu/rubixkube` in the pr
 ```powershell
 wsl -d Ubuntu-22.04 -- /mnt/h/GSocProjects/optimizationjob/.tools/gpu/rubixkube start --gpu
 wsl -d Ubuntu-22.04 -- /mnt/h/GSocProjects/optimizationjob/.tools/gpu/rubixkube run --gpu
-wsl -d Ubuntu-22.04 -- /mnt/h/GSocProjects/optimizationjob/.tools/gpu/rubixkube serve --directory /mnt/h/GSocProjects/optimizationjob-evidence/runs/gpu/reports --port 8766
+wsl -d Ubuntu-22.04 -- /mnt/h/GSocProjects/optimizationjob/.tools/gpu/rubixkube plot --report /mnt/h/GSocProjects/optimizationjob-evidence/runs/gpu/reports/report.json
 ```
 
 To use the existing isolated Docker Rust toolchain, run the root README Docker commands with `--features cuda` added to `cargo build` and `cargo test`, and export the resulting release executable to `.tools/gpu/rubixkube`. Stop an executable before overwriting it or stage a new path; in-place overwrite of a running Linux executable fails.
@@ -52,7 +52,7 @@ Each successful worker log contains `training_complete` with:
 
 A separate `metric_delivered` event proves Trainer acknowledged final metrics. The runner also checks the actual successful Pod requested `nvidia.com/gpu: 1`; a CPU execution string or missing GPU proof is rejected in GPU mode. Saved report JSON includes the GPU evidence per trial and `coverage.gpu: true` only after those checks.
 
-`../optimizationjob-evidence/runs/gpu/` holds external test outputs, image identities and real cluster evidence. `reports/` holds the checked result, resources and worker logs; `serve --directory ... --port 8766` serves only saved results over loopback. Kubeconfig and host driver files are never placed in the report directory or Git.
+`../optimizationjob-evidence/runs/gpu/` holds external test outputs, image identities and real cluster evidence. `reports/` holds the checked result, resources, worker logs, plain PNG/SVG graphs, numeric CSV and a text summary. `plot --report PATH` regenerates graphs from the saved data without accessing the cluster. No web app or HTTP server is included. Kubeconfig and host driver files stay outside Git. Example plots and numeric results are committed in `demo/results/gpu/`.
 
 ## Hardware tests
 

@@ -1,12 +1,12 @@
-use optimizationjob::{orchestrate::validate_worker, serve::resolve_file};
+use optimizationjob::orchestrate::validate_worker;
 use serde_json::json;
-use std::{process::Command, time::Duration};
+use std::process::Command;
 #[test]
 fn cli_help_and_invalid_commands() {
     let executable = env!("CARGO_BIN_EXE_optimizationjob");
     let output = Command::new(executable).arg("--help").output().unwrap();
     assert!(output.status.success());
-    for command in ["train", "run", "start", "smoke", "serve"] {
+    for command in ["train", "run", "start", "smoke", "plot"] {
         assert!(String::from_utf8_lossy(&output.stdout).contains(command));
     }
     assert!(!Command::new(executable)
@@ -33,30 +33,6 @@ fn local_cli_emits_real_training_without_claiming_delivery() {
     assert!(!String::from_utf8_lossy(&output.stdout).contains("metric_delivered"));
 }
 #[test]
-fn report_paths_cannot_escape_root() {
-    let dir = tempfile::tempdir().unwrap();
-    std::fs::write(dir.path().join("index.html"), "report").unwrap();
-    assert_eq!(
-        resolve_file(dir.path(), "/").unwrap(),
-        dir.path().join("index.html")
-    );
-    for path in [
-        "/../credentials",
-        "/%2e%2e/credentials",
-        "/%2Fetc/passwd",
-        "/missing",
-        "/%FF",
-        "/%00",
-    ] {
-        assert!(resolve_file(dir.path(), path).is_err(), "{path}");
-    }
-    #[cfg(unix)]
-    {
-        std::os::unix::fs::symlink("/etc/passwd", dir.path().join("escape")).unwrap();
-        assert!(resolve_file(dir.path(), "/escape").is_err());
-    }
-}
-#[test]
 fn worker_evidence_requires_training_acknowledgement_and_consistent_loss() {
     let trained = optimizationjob::training::train(0.1, 40).unwrap();
     let mut event = serde_json::to_value(&trained).unwrap();
@@ -77,46 +53,6 @@ fn worker_evidence_requires_training_acknowledgement_and_consistent_loss() {
     )
     .is_err());
 }
-#[test]
-fn loopback_server_serves_report_and_rejects_traversal() {
-    use std::io::{Read, Write};
-    let dir = tempfile::tempdir().unwrap();
-    std::fs::write(dir.path().join("index.html"), "hello-report").unwrap();
-    let port = std::net::TcpListener::bind("127.0.0.1:0")
-        .unwrap()
-        .local_addr()
-        .unwrap()
-        .port();
-    let mut child = Command::new(env!("CARGO_BIN_EXE_optimizationjob"))
-        .args(["serve", "--directory"])
-        .arg(dir.path())
-        .arg("--port")
-        .arg(port.to_string())
-        .spawn()
-        .unwrap();
-    let mut socket = None;
-    for _ in 0..100 {
-        if let Ok(connected) = std::net::TcpStream::connect(("127.0.0.1", port)) {
-            socket = Some(connected);
-            break;
-        }
-        std::thread::sleep(Duration::from_millis(20));
-    }
-    let mut socket = socket.expect("server started");
-    socket
-        .set_read_timeout(Some(Duration::from_secs(2)))
-        .unwrap();
-    socket
-        .write_all(b"GET / HTTP/1.1\r\nHost: localhost\r\n\r\n")
-        .unwrap();
-    let mut response = String::new();
-    socket.read_to_string(&mut response).unwrap();
-    child.kill().unwrap();
-    child.wait().unwrap();
-    assert!(response.starts_with("HTTP/1.1 200"));
-    assert!(response.ends_with("hello-report"));
-}
-
 #[test]
 fn generated_job_names_leave_room_for_upstream_trial_and_pod_suffixes() {
     let name = optimizationjob::orchestrate::new_job_name();

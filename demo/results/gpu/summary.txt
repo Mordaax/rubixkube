@@ -1,0 +1,10 @@
+Job: rust-hpo-1792842551919
+Execution: CUDA GPU
+Trials: 4
+Winner: rust-hpo-1792842551919-trial-pshwslfl
+Learning rate: 0.1
+Validation MSE: 0.007317005521907829
+
+Measured observations: results.csv
+Validation curves: loss-by-epoch.png / .svg
+Final trial losses: trial-results.png / .svg

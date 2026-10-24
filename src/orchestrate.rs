@@ -332,19 +332,13 @@ pub fn run(root: &Path, options: &RunOptions) -> Result<Value> {
     save_json(&options.output, "optimizationjob.json", &job)?;
     save_json(&options.output, "trainjobs.json", &json!(trials))?;
     save_json(&options.output, "report.json", &report)?;
-    let template = fs::read_to_string(root.join("demo/report-template.html"))?;
-    let data = serde_json::to_string(&report)?.replace('<', "\\u003c");
-    save(
-        &options.output,
-        "index.html",
-        template.replace("__DEMO_DATA__", &data),
-    )?;
+    crate::plots::write_plots(&report, &options.output)?;
     println!(
-        "VERIFIED WINNER: {}\nlearning_rate={}; val_loss={}\nWalkthrough: {}",
+        "VERIFIED WINNER: {}\nlearning_rate={}; val_loss={}\nPlots and CSV: {}",
         string(&report, "/best/name")?,
         report["best"]["learning_rate"],
         report["best"]["val_loss"],
-        options.output.join("index.html").display()
+        options.output.display()
     );
     Ok(report)
 }
