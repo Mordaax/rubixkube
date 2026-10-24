@@ -122,3 +122,24 @@ pub fn verify_checkout(checkout: &Path, expected: &str) -> Result<()> {
     }
     Ok(())
 }
+
+/// Retry a read-only readiness probe within one deadline, retaining its last error.
+/// The probe receives its remaining budget so external commands can be bounded.
+pub fn wait_for<F>(timeout: Duration, interval: Duration, mut probe: F) -> Result<()>
+where
+    F: FnMut(Duration) -> Result<()>,
+{
+    let started = Instant::now();
+    let mut last = "No readiness probe completed".to_owned();
+    loop {
+        let remaining = timeout.saturating_sub(started.elapsed());
+        if remaining.is_zero() {
+            return Err(invalid(format!("Readiness deadline exceeded: {last}")));
+        }
+        match probe(remaining) {
+            Ok(()) => return Ok(()),
+            Err(error) => last = error.to_string(),
+        }
+        thread::sleep(interval.min(timeout.saturating_sub(started.elapsed())));
+    }
+}

@@ -116,3 +116,14 @@ fn loopback_server_serves_report_and_rejects_traversal() {
     assert!(response.starts_with("HTTP/1.1 200"));
     assert!(response.ends_with("hello-report"));
 }
+
+#[test]
+fn generated_job_names_leave_room_for_upstream_trial_and_pod_suffixes() {
+    let name = optimizationjob::orchestrate::new_job_name();
+    assert!(name.starts_with("rust-hpo-"));
+    // Observed upstream suffix: -trial-xxxxxxxx-node-0-0-xxxxx (29 chars).
+    assert!(name.len() + 29 <= 63, "{name}");
+    assert!(name
+        .bytes()
+        .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-'));
+}

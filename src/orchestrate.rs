@@ -1,7 +1,7 @@
 //! Submit real TrainJobs, collect checked evidence, and reproduce the local cluster.
 use crate::{
     invalid,
-    process::{capture, checked, verify_checkout},
+    process::{capture, checked, verify_checkout, wait_for},
     report::{condition, string, summarize},
     training::TrainingResult,
     Result,
@@ -166,10 +166,7 @@ pub fn run(root: &Path, options: &RunOptions) -> Result<Value> {
             &options.kubeconfig,
             &["create", "--dry-run=client", "-f", path, "-o", "json"],
         )?;
-        let name = format!(
-            "rust-learning-rate-demo-{}",
-            chrono::Utc::now().timestamp_millis()
-        );
+        let name = new_job_name();
         manifest["metadata"]["name"] = json!(name);
         kube(&options.kubeconfig, &["create", "-f", "-"], Some(&manifest))?;
         name
@@ -398,6 +395,21 @@ pub fn start(root: &Path, options: &RunOptions) -> Result<Value> {
             60,
         )?;
     }
+    wait_for(
+        Duration::from_secs(120),
+        Duration::from_secs(1),
+        |remaining| {
+            checked(
+                Command::new("kubectl")
+                    .arg("--kubeconfig")
+                    .arg(&options.kubeconfig)
+                    .args(["--context", CONTEXT, "get", "nodes", "-o", "name"]),
+                None,
+                remaining.min(Duration::from_secs(5)),
+            )
+            .map(|_| ())
+        },
+    )?;
     checked(
         Command::new("kubectl")
             .arg("--kubeconfig")
@@ -578,4 +590,9 @@ pub fn smoke(root: &Path, trainer: Option<&Path>, output: &Path) -> Result<()> {
         println!("{passes} passing test/subtest events; no failures");
     }
     Ok(())
+}
+
+/// Keep enough name space for upstream Trial, JobSet and Pod suffixes.
+pub fn new_job_name() -> String {
+    format!("rust-hpo-{}", chrono::Utc::now().timestamp_millis())
 }

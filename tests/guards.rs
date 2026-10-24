@@ -78,3 +78,26 @@ fn drains_large_output_without_pipe_deadlock() {
     .unwrap();
     assert_eq!(result.len(), 2 * 1024 * 1024);
 }
+
+#[test]
+fn readiness_retries_startup_errors_but_has_a_finite_deadline() {
+    use optimizationjob::{invalid, process::wait_for};
+    let mut attempts = 0;
+    wait_for(Duration::from_secs(1), Duration::from_millis(1), |_| {
+        attempts += 1;
+        if attempts < 3 {
+            Err(invalid("API starting"))
+        } else {
+            Ok(())
+        }
+    })
+    .unwrap();
+    assert_eq!(attempts, 3);
+    let started = Instant::now();
+    let error = wait_for(Duration::from_millis(20), Duration::from_millis(1), |_| {
+        Err(invalid("permanent permission denied"))
+    })
+    .unwrap_err();
+    assert!(error.to_string().contains("permanent permission denied"));
+    assert!(started.elapsed() < Duration::from_secs(1));
+}
