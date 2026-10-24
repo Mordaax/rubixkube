@@ -11,3 +11,5 @@
 /artifacts/
 __pycache__/
 *.py[cod]
+
+/target/
