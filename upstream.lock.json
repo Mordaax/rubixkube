@@ -1,0 +1,35 @@
+{
+  "schema_version": 1,
+  "recorded_at": "2026-10-24",
+  "compatibility": "audit baseline; not yet validated as a deployed cross-repository combination",
+  "repositories": {
+    "trainer": {
+      "url": "https://github.com/kubeflow/trainer.git",
+      "default_branch": "master",
+      "commit": "b12f9683152ec2942c2aa5c3df42d206aee757d5",
+      "checkout": "../kubeflow/trainer"
+    },
+    "sdk": {
+      "url": "https://github.com/kubeflow/sdk.git",
+      "default_branch": "main",
+      "commit": "ee22b33fbb261a2601f5dae9b11c2d82ea7dc7db",
+      "checkout": "../kubeflow/sdk"
+    },
+    "katib": {
+      "url": "https://github.com/kubeflow/katib.git",
+      "default_branch": "master",
+      "commit": "dae0fc5c2f7af60ca15e96e1066ef0f49d709e33",
+      "checkout": "../kubeflow/katib"
+    }
+  },
+  "trainer_runtime_contract": {
+    "api_version": "trainer.kubeflow.org/v1alpha1",
+    "kind": "OptimizationJob",
+    "plural": "optimizationjobs",
+    "go_directive": "1.27.0",
+    "status_feature_gate": "TrainJobStatus=true",
+    "suggestion_image": "ghcr.io/kubeflow/katib/suggestion-optuna:v0.19.0",
+    "suggestion_image_digest": null,
+    "katib_go_dependency": "v0.19.0"
+  }
+}

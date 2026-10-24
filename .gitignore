@@ -1,0 +1,13 @@
+# Planning documents belong outside this repository.
+/plans/
+/optimizationjob-plan/
+/*-plan.md
+/design.md
+
+# Local execution state, environments and raw evidence.
+/.superpowers/
+/.venv/
+/.tools/
+/artifacts/
+__pycache__/
+*.py[cod]
